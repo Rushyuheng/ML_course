@@ -1,137 +1,117 @@
-import random
+"""
+The template of the main script of the machine learning process
+"""
 import pickle
 from os import path
+
 import numpy as np
+import games.arkanoid.communication as comm
+from games.arkanoid.communication import ( \
+    SceneInfo, GameStatus, PlatformAction
+)
 
-class MLPlay:
-    def __init__(self, player):
-        filename = path.join(path.dirname(__file__), 'save', 'clf.pickle')
-        with open(filename, 'rb') as file:
-            self.clf = pickle.load(file)
-        self.player = player
-        if self.player == "player1":
-            self.player_no = 0
-        elif self.player == "player2":
-            self.player_no = 1
-        elif self.player == "player3":
-            self.player_no = 2
-        elif self.player == "player4":
-            self.player_no = 3
-        self.car_vel = 0                            # speed initial
-        self.car_pos = (0,0)                        # pos initial
-        self.car_lane = self.car_pos[0] // 70       # lanes 0 ~ 8
-        self.lanes = [35, 105, 175, 245, 315, 385, 455, 525, 595] # lanes center
-        self.rand_dir_seq = 1
-        self.command = []
 
-        pass
 
-    def update(self, scene_info):
-        """
-        9 grid relative position
-        |    |    |    |
-        |  1 |  2 |  3 |
-        |    |  5 |    |
-        |  4 10 c 11 6 |
-        |    |    |    |
-        |  7 |  8 |  9 |
-        |    |    |    |       
-        """
-        def check_grid():
-            cars_view = [100,100,100,100,100,100,100,100,100,100,100,100]
-            speed_ahead = 100
-            if self.car_pos[0] <= 35: # reach left bound
-                cars_view[1] = -100 # can't go 
-                cars_view[4] = -100
-                cars_view[7] = -100
-            elif self.car_pos[0] >= 595: # reach right bound
-                cars_view[3] = -100
-                cars_view[6] = -100
-                cars_view[9] = -100
+def ml_loop():
+    """
+    The main loop of the machine learning process
 
-            for car in scene_info["cars_info"]:
-                if car["id"] != self.player_no:
-                    x = self.car_pos[0] - car["pos"][0] # x relative position
-                    y = self.car_pos[1] - car["pos"][1] # y relative position
-                    #middel lanes
-                    if x <= 40 and x >= -40 :      
-                        if y > 0 and y < 300:
-                            cars_view[2] = car["velocity"] - self.car_vel
-                            if y < 200:
-                                cars_view[5] = car["velocity"] - self.car_vel
-                        elif y < 0 and y > -200:
-                            cars_view[8] = car["velocity"] - self.car_vel
-                    #right lanes
-                    if x > -100 and x <= -40 :
-                        if y > 80 and y < 250:
-                            cars_view[3] = car["velocity"] - self.car_vel
-                        elif y < -80 and y > -200:
-                            cars_view[9] = car["velocity"] - self.car_vel
-                        elif y < 80 and y > -80:
-                            if x >= -50 and x <= -40:
-                                cars_view[11] = car["velocity"] - self.car_vel
-                            else:
-                                cars_view[6] = car["velocity"] - self.car_vel
-                    #left lanes
-                    if x < 100 and x >= 40:
-                        if y > 80 and y < 250:
-                            cars_view[1] = car["velocity"] - self.car_vel
-                        elif y < -80 and y > -200:
-                            cars_view[7] = car["velocity"] - self.car_vel
-                        elif y < 80 and y > -80:
-                            if x <= 50 and x >= 40:
-                                cars_view[10] = car["velocity"] - self.car_vel
-                            else:
-                                cars_view[4] = car["velocity"] - self.car_vel
-            if((self.car_pos[0] - 35) % 70 == 0 or (cars_view[5] != 100) or (cars_view[10] != 100) or (cars_view[11] != 100)):#update after change lane or emergency case
-                self.command = move(cars_view)
-            return self.command
-            
-        def move(cars_view): 
-            feature = [self.car_vel,self.car_pos[0],self.car_pos[1]]
-            for i in range(1,12):
-                feature.append(cars_view[i])
-            feature = np.array(feature)
-            feature = feature.reshape((1,14))
-            commandcode = self.clf.predict(feature)
+    This loop is run in a separate process, and communicates with the game process.
 
-            #decode
-            if commandcode == 0 :
-                return None
-            elif commandcode == 1:
-                return ["BRAKE"]
-            elif commandcode == 2:
-                return ["SPEED"]
-            elif commandcode == 3:
-                return ["MOVE_LEFT"]
-            elif commandcode == 4:
-                return ["MOVE_RIGHT"]
-            elif commandcode == 5:
-                return ["SPEED","MOVE_RIGHT"]
-            elif commandcode == 6:
-                return ["SPEED","MOVE_LEFT"]
-            elif commandcode == 7:
-                return ["BRAKE","MOVE_RIGHT"]
-            elif commandcode == 8:
-                return ["BRAKE","MOVE_LEFT"]
-            
-                        
-                    
-        if len(scene_info[self.player]) != 0:
-            self.car_pos = scene_info[self.player]
+    Note that the game process won't wait for the ml process to generate the
+    GameInstruction. It is possible that the frame of the GameInstruction
+    is behind of the current frame in the game process. Try to decrease the fps
+    to avoid this situation.
+    """
 
-        for car in scene_info["cars_info"]:
-            if car["id"]==self.player_no:
-                self.car_vel = car["velocity"]
+    # === Here is the execution order of the loop === #
+    # 1. Put the initialization code here.
+    ball_served = False
+    filename = path.join(path.dirname(__file__), 'save', 'clf_KMeans_BallAndDirection.pickle')
+    with open(filename, 'rb') as file:
+        clf = pickle.load(file)
+    s = [93, 93]
 
-        if scene_info["status"] != "ALIVE":
-            return "RESET"
-        self.car_lane = self.car_pos[0] // 70
+    def get_direction(ball_x, ball_y, ball_pre_x, ball_pre_y):
+        VectorX = ball_x - ball_pre_x
+        VectorY = ball_y - ball_pre_y
+        if (VectorX >= 0 and VectorY >= 0):
+            return 0
+        elif (VectorX > 0 and VectorY < 0):
+            return 1
+        elif (VectorX < 0 and VectorY > 0):
+            return 2
+        elif (VectorX < 0 and VectorY < 0):
+            return 3
+        else:
+            return 4
 
-        return check_grid()
+    def get_vector(ball_x, ball_y, ball_pre_x, ball_pre_y):
+        VectorX = ball_x - ball_pre_x
+        VectorY = ball_y - ball_pre_y
+        return VectorX,VectorY
+    # 2. Inform the game process that ml process is ready before start the loop.
+    comm.ml_ready()
+    
 
-    def reset(self):
-        """
-        Reset the status
-        """
-        pass
+
+    # 3. Start an endless loop.
+    while True:
+        # 3.1. Receive the scene information sent from the game process.
+        scene_info = comm.get_scene_info()
+        feature = []
+        feature.append(scene_info.ball[0])
+        feature.append(scene_info.ball[1])
+
+        feature.append(scene_info.platform[0])
+        feature.append(get_direction(feature[0],feature[1],s[0],s[1]))
+        feature.append(get_vector(feature[0],feature[1],s[0],s[1])[0])
+        feature.append(get_vector(feature[0],feature[1],s[0],s[1])[1])
+        s = [feature[0], feature[1]]
+
+        feature = np.array(feature)
+        feature = feature.reshape((-1,6))
+
+        feature = feature[:,:4] #cordinate mode
+        #feature = feature[:,2:] #vector mode
+
+        # 3.2. If the game is over or passed, the game process will reset
+        #      the scene and wait for ml process doing resetting job.
+        if scene_info.status == GameStatus.GAME_OVER or \
+            scene_info.status == GameStatus.GAME_PASS:
+            # Do some stuff if needed
+            ball_served = False
+
+            # 3.2.1. Inform the game process that ml process is ready
+            comm.ml_ready()
+            continue
+
+        # 3.3. Put the code here to handle the scene information
+        stay_at = 100
+        platform_x = scene_info.platform[0] + 20
+        senserange = 5
+
+        # 3.4. Send the instruction for this frame to the game process
+        if not ball_served:
+            comm.send_instruction(scene_info.frame, PlatformAction.SERVE_TO_LEFT)
+            ball_served = True
+        else:
+            if scene_info.ball[1] > 250:
+                y = clf.predict(feature)
+                
+                if y == 0:
+                    comm.send_instruction(scene_info.frame, PlatformAction.NONE)
+                    print('NONE')
+                elif y == 1:
+                    comm.send_instruction(scene_info.frame, PlatformAction.MOVE_LEFT)
+                    print('LEFT')
+                elif y == 2:
+                    comm.send_instruction(scene_info.frame, PlatformAction.MOVE_RIGHT)
+                    print('RIGHT')
+            else:
+                if platform_x  + senserange < stay_at:
+                    comm.send_instruction(scene_info.frame, PlatformAction.MOVE_RIGHT)
+                elif platform_x - senserange > stay_at:
+                    comm.send_instruction(scene_info.frame, PlatformAction.MOVE_LEFT)
+                else:
+                    comm.send_instruction(scene_info.frame, PlatformAction.NONE)
