@@ -26,7 +26,7 @@ def ml_loop(side: str):
     # === Here is the execution order of the loop === #
     # 1. Put the initialization code here
     ball_served = False
-    filename = path.join(path.dirname(__file__), 'save', 'clf_reg.pickle')
+    filename = path.join(path.dirname(__file__), 'save', 'clf_KMeans_BallAndDirection.pickle')
     with open(filename, 'rb') as file:
         clf = pickle.load(file)
     filename = path.join(path.dirname(__file__), 'save', 'clf_hitblocker.pickle')
@@ -85,8 +85,8 @@ def ml_loop(side: str):
         predhitblock = clf_hitblocker.predict(feature)
         if(predhitblock == 1):
             return True
-        else:
-            return False
+        elif(predhitblock == 2):
+            return True
 
 
     def move_to(player, pred) :
@@ -111,7 +111,7 @@ def ml_loop(side: str):
                 return sliceball()
         
         if scene_info["ball_speed"][1] > 0 : # 球正在向下 # ball goes down
-            if scene_info["ball"][1] > 260 or scene_info["frame"] < 1200:
+            if(scene_info["frame"]) < 1200:
             
                 x = ( scene_info["platform_1P"][1] - scene_info["ball"][1] ) / scene_info["ball_speed"][1] # 幾個frame以後會需要接  # x means how many frames before catch the ball
                 pred = scene_info["ball"][0] + (scene_info["ball_speed"][0]*x)  # 預測最終位置 # pred means predict ball landing site 
@@ -136,7 +136,7 @@ def ml_loop(side: str):
                     feature.append(0)
                 feature = np.array(feature)
                 feature = feature.reshape((-1,8))
-                return move_to(player = '1P',pred = round(clf.predict(feature)[0]))
+                return clf.predict(feature)
 
         elif scene_info["ball_speed"][1] < 0: # 球正在向上 # ball goes up
             return move_to(player = '1P',pred = 100)
