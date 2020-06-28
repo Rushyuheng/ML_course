@@ -38,69 +38,47 @@ class MLPlay:
         |    |    |    |       
         """
         def check_grid():
-            cars_view = [100,100,100,100,100,100,100,100,100,100,100,100]
-            speed_ahead = 100
-            if self.car_pos[0] <= 35: # reach left bound
-                cars_view[1] = -100 # can't go 
-                cars_view[4] = -100
-                cars_view[7] = -100
-            elif self.car_pos[0] >= 595: # reach right bound
-                cars_view[3] = -100
-                cars_view[6] = -100
-                cars_view[9] = -100
+            detect_n = 8
+            cars_view = np.zeros(shape=(2 * detect_n + 1,2 * detect_n + 1))
+            coin_view = np.zeros(shape=(2 * detect_n + 1,2 * detect_n + 1))
 
             for car in scene_info["cars_info"]:
                 if car["id"] != self.player_no:
                     x = self.car_pos[0] - car["pos"][0] # x relative position
                     y = self.car_pos[1] - car["pos"][1] # y relative position
-                    #middel lanes
-                    if x <= 40 and x >= -40 :      
-                        if y > 0 and y < 300:
-                            cars_view[2] = car["velocity"] - self.car_vel
-                            if y < 200:
-                                cars_view[5] = car["velocity"] - self.car_vel
-                        elif y < 0 and y > -200:
-                            cars_view[8] = car["velocity"] - self.car_vel
-                    #right lanes
-                    if x > -100 and x <= -40 :
-                        if y > 80 and y < 250:
-                            cars_view[3] = car["velocity"] - self.car_vel
-                        elif y < -80 and y > -200:
-                            cars_view[9] = car["velocity"] - self.car_vel
-                        elif y < 80 and y > -80:
-                            if x >= -50 and x <= -40:
-                                cars_view[11] = car["velocity"] - self.car_vel
-                            else:
-                                cars_view[6] = car["velocity"] - self.car_vel
-                    #left lanes
-                    if x < 100 and x >= 40:
-                        if y > 80 and y < 250:
-                            cars_view[1] = car["velocity"] - self.car_vel
-                        elif y < -80 and y > -200:
-                            cars_view[7] = car["velocity"] - self.car_vel
-                        elif y < 80 and y > -80:
-                            if x <= 50 and x >= 40:
-                                cars_view[10] = car["velocity"] - self.car_vel
-                            else:
-                                cars_view[4] = car["velocity"] - self.car_vel
-            if((self.car_pos[0] - 35) % 70 == 0 or (cars_view[5] != 100) or (cars_view[10] != 100) or (cars_view[11] != 100)):#update after change lane or emergency case
-                self.command = move(cars_view)
-            return self.command
+                    if(x < detect_n * 100 and x > detect_n * -100) and(y < detect_n * 100 and y > detect_n * -100): # detect range is 1600 * 1600
+                        index_x =  detect_n - (x // 100)
+                        index_y =  detect_n - (y // 100)
+                        cars_view[index_y][index_x] = car["velocity"]
             
-        def move(cars_view): 
+            for coin in scene_info["coins"]:
+                coin_x = self.car_pos[0] - coin[0] # relative position from car to coin
+                coin_y = self.car_pos[1] - coin[1]
+                if(coin_x < detect_n * 100 and coin_x > detect_n * -100) and(coin_y < detect_n * 100 and coin_y > detect_n * -100): # detect range is 1600 * 1600
+                    index_cx =  detect_n - (coin_x // 100)
+                    index_cy =  detect_n - (coin_y // 100)
+                    coin_view[index_cy][index_cx] = 1
+
+            return move(cars_view.flatten(),coin_view.flatten())
+            
+        def move(cars_view,coin_view): 
             feature = [self.car_vel,self.car_pos[0],self.car_pos[1]]
-            for i in range(1,12):
+
+            for i in range(0,len(cars_view)):
                 feature.append(cars_view[i])
-            feature = np.array(feature)
-            feature = feature.reshape((1,14))
-            commandcode = self.clf.predict(feature)
+            for i in range(0,len(coin_view)):
+                feature.append(coin_view[i])
+
+            feature_np = np.array(feature)
+            feature_np = feature_np.reshape((1,len(feature)))
+            commandcode = self.clf.predict(feature_np)
 
             #decode
-            if commandcode == 0 :
+            if commandcode == 0 or commandcode == 9:
                 return None
             elif commandcode == 1:
                 return ["BRAKE"]
-            elif commandcode == 2:
+            elif commandcode == 2 or commandcode == 10:
                 return ["SPEED"]
             elif commandcode == 3:
                 return ["MOVE_LEFT"]
@@ -128,7 +106,10 @@ class MLPlay:
             return "RESET"
         self.car_lane = self.car_pos[0] // 70
 
-        return check_grid()
+        if(scene_info["frame"] < 100):
+            return ["SPEED"]
+        else:
+            return check_grid()
 
     def reset(self):
         """
