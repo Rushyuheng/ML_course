@@ -57,7 +57,7 @@ class MLPlay:
                 if(coin_x < detect_n * 100 and coin_x > detect_n * -100) and(coin_y < detect_n * 100 and coin_y > detect_n * -100): # detect range is 1600 * 1600
                     index_cx =  detect_n - (coin_x // 100)
                     index_cy =  detect_n - (coin_y // 100)
-                    coin_view[index_cy][index_cx] = 1
+                    coin_view[index_cy][index_cx] = 15
 
             return move(cars_view.flatten(),coin_view.flatten())
             
